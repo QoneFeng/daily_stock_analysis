@@ -13,6 +13,7 @@ import {
   getProviderTemplate,
   isKnownProviderTemplate,
 } from './llmProviderTemplates';
+import { SettingsHelpButton } from './SettingsHelpButton';
 
 const PROTOCOL_OPTIONS: Array<{ value: ChannelProtocol; label: string }> = [
   { value: 'openai', label: 'OpenAI Compatible' },
@@ -47,6 +48,8 @@ const KNOWN_MODEL_PREFIXES = new Set([
   'friendliai',
 ]);
 
+const CHANNEL_FIELD_SUFFIXES = ['PROTOCOL', 'BASE_URL', 'API_KEY', 'API_KEYS', 'MODELS', 'EXTRA_HEADERS', 'ENABLED'] as const;
+const CHANNEL_FIELD_KEY_PATTERN = /^LLM_([A-Z0-9_]+)_(PROTOCOL|BASE_URL|API_KEY|API_KEYS|MODELS|EXTRA_HEADERS|ENABLED)$/;
 const FALSEY_VALUES = new Set(['0', 'false', 'no', 'off']);
 
 const RUNTIME_CAPABILITY_OPTIONS: Array<{ value: LLMCapabilityCheck; label: string; hint: string }> = [
@@ -102,7 +105,7 @@ interface RuntimeConfig {
 }
 
 interface LLMChannelEditorProps {
-  items: Array<{ key: string; value: string }>;
+  items: Array<{ key: string; value: string; rawValueExists?: boolean }>;
   configVersion: string;
   maskToken: string;
   onSaved: (updatedItems: Array<{ key: string; value: string }>) => void | Promise<void>;
@@ -126,6 +129,215 @@ interface ChannelRowProps {
   onDiscoverModels: (channel: ChannelConfig) => void;
   onToggleCapability: (channel: ChannelConfig, capability: LLMCapabilityCheck) => void;
   onCheckCapabilities: (channel: ChannelConfig) => void;
+}
+
+const LLM_CHANNEL_HELP_DOCS = [
+  {
+    label: 'LLM 配置指南',
+    href: 'https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/LLM_CONFIG_GUIDE.md',
+  },
+  {
+    label: 'LLM 服务商配置速查',
+    href: 'https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/llm-providers.md',
+  },
+];
+
+function HelpLabel({
+  htmlFor,
+  label,
+  fieldKey,
+  helpKey,
+  examples,
+  compact = false,
+}: {
+  htmlFor?: string;
+  label: string;
+  fieldKey: string;
+  helpKey: string;
+  examples?: string[];
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? 'mb-1 flex items-center gap-1.5' : 'mb-2 flex items-center gap-1.5'}>
+      <label
+        htmlFor={htmlFor}
+        className={compact ? 'text-xs text-muted-text' : 'text-sm font-medium text-foreground'}
+      >
+        {label}
+      </label>
+      <SettingsHelpButton
+        fieldKey={fieldKey}
+        title={label}
+        helpKey={helpKey}
+        examples={examples}
+        docs={LLM_CHANNEL_HELP_DOCS}
+      />
+    </div>
+  );
+}
+
+function parseChannelFieldKeys(channel: ChannelConfig): string[] {
+  const upperName = channel.name.trim().toUpperCase();
+  return [
+    `LLM_${upperName}_PROTOCOL`,
+    `LLM_${upperName}_BASE_URL`,
+    `LLM_${upperName}_ENABLED`,
+    `LLM_${upperName}_API_KEY`,
+    `LLM_${upperName}_API_KEYS`,
+    `LLM_${upperName}_MODELS`,
+    `LLM_${upperName}_EXTRA_HEADERS`,
+  ];
+}
+
+function parseChannelFieldKeysFromName(name: string): string[] {
+  const upperName = name.trim().toUpperCase();
+  return CHANNEL_FIELD_SUFFIXES.map((suffix) => `LLM_${upperName}_${suffix}`);
+}
+
+function isChannelSecretFieldKey(key: string): boolean {
+  const match = CHANNEL_FIELD_KEY_PATTERN.exec(key.toUpperCase());
+  return match?.[2] === 'API_KEY' || match?.[2] === 'API_KEYS';
+}
+
+function resolveInitialChannelApiKeySource(
+  channelName: string,
+  initialItemValueByKey: Map<string, string>,
+  initialItemSourceByKey: Map<string, boolean>,
+): boolean | undefined {
+  const upperName = channelName.trim().toUpperCase();
+  const apiKeysKey = `LLM_${upperName}_API_KEYS`;
+  const apiKeyKey = `LLM_${upperName}_API_KEY`;
+
+  const apiKeysValue = (initialItemValueByKey.get(apiKeysKey) || '').trim();
+  const apiKeyValue = (initialItemValueByKey.get(apiKeyKey) || '').trim();
+
+  if (apiKeysValue && initialItemSourceByKey.has(apiKeysKey)) {
+    return initialItemSourceByKey.get(apiKeysKey);
+  }
+  if (apiKeyValue && initialItemSourceByKey.has(apiKeyKey)) {
+    return initialItemSourceByKey.get(apiKeyKey);
+  }
+
+  if (apiKeyValue) {
+    return initialItemSourceByKey.get(apiKeyKey);
+  }
+  if (apiKeysValue) {
+    return initialItemSourceByKey.get(apiKeysKey);
+  }
+  return initialItemSourceByKey.get(apiKeysKey) ?? initialItemSourceByKey.get(apiKeyKey);
+}
+
+function resolveInitialChannelApiKeyValue(
+  channelName: string,
+  itemValueByKey: Map<string, string>,
+  itemSourceByKey: Map<string, boolean>,
+): string {
+  const upperName = channelName.trim().toUpperCase();
+  const apiKeysKey = `LLM_${upperName}_API_KEYS`;
+  const apiKeyKey = `LLM_${upperName}_API_KEY`;
+
+  const apiKeysValue = (itemValueByKey.get(apiKeysKey) || '').trim();
+  const apiKeyValue = (itemValueByKey.get(apiKeyKey) || '').trim();
+
+  if (apiKeysValue && itemSourceByKey.has(apiKeysKey)) {
+    return apiKeysValue;
+  }
+  if (apiKeyValue && itemSourceByKey.has(apiKeyKey)) {
+    return apiKeyValue;
+  }
+  if (apiKeysValue) {
+    return apiKeysValue;
+  }
+  if (apiKeyValue) {
+    return apiKeyValue;
+  }
+  return itemValueByKey.get(apiKeysKey) || itemValueByKey.get(apiKeyKey) || '';
+}
+
+function buildChangedItemKeys(
+  channels: ChannelConfig[],
+  initialChannels: ChannelConfig[],
+  initialItemSourceByKey: Map<string, boolean>,
+  initialItemValueByKey: Map<string, string>,
+): Set<string> {
+  const changedKeys = new Set<string>();
+  const nextChannelNames = channels.map((channel) => channel.name.trim().toLowerCase()).join(',');
+  const previousChannelNames = initialChannels.map((channel) => channel.name.trim().toLowerCase()).join(',');
+
+  if (nextChannelNames !== previousChannelNames) {
+    changedKeys.add('LLM_CHANNELS');
+  }
+
+  const maxLength = Math.max(channels.length, initialChannels.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const current = channels[index];
+    const previous = initialChannels[index];
+    if (!current && !previous) {
+      continue;
+    }
+
+    if (!current) {
+      const previousKeys = parseChannelFieldKeys(previous);
+      for (const key of previousKeys) {
+        if (initialItemSourceByKey.get(key.toUpperCase()) !== false) {
+          changedKeys.add(key);
+        }
+      }
+      continue;
+    }
+
+    if (!previous) {
+      for (const key of parseChannelFieldKeys(current)) {
+        changedKeys.add(key);
+      }
+      continue;
+    }
+
+    const currentName = current.name.trim().toUpperCase();
+    const previousName = previous.name.trim().toUpperCase();
+    if (currentName !== previousName) {
+      const previousApiKeySource = resolveInitialChannelApiKeySource(
+        previous.name,
+        initialItemValueByKey,
+        initialItemSourceByKey,
+      );
+      const preserveRuntimeOnlySecret = previousApiKeySource === false && current.apiKey === previous.apiKey;
+      const previousKeys = parseChannelFieldKeys(previous);
+      for (const key of previousKeys) {
+        if (initialItemSourceByKey.get(key.toUpperCase()) !== false) {
+          changedKeys.add(key);
+        }
+      }
+
+      for (const key of parseChannelFieldKeys(current)) {
+        if (preserveRuntimeOnlySecret && isChannelSecretFieldKey(key)) {
+          continue;
+        }
+        changedKeys.add(key);
+      }
+      continue;
+    }
+
+    const prefix = `LLM_${currentName}`;
+    if (current.protocol !== previous.protocol) {
+      changedKeys.add(`${prefix}_PROTOCOL`);
+    }
+    if (current.baseUrl !== previous.baseUrl) {
+      changedKeys.add(`${prefix}_BASE_URL`);
+    }
+    if (current.enabled !== previous.enabled) {
+      changedKeys.add(`${prefix}_ENABLED`);
+    }
+    if (current.apiKey !== previous.apiKey) {
+      changedKeys.add(`${prefix}_API_KEY`);
+      changedKeys.add(`${prefix}_API_KEYS`);
+    }
+    if (current.models !== previous.models) {
+      changedKeys.add(`${prefix}_MODELS`);
+    }
+  }
+
+  return changedKeys;
 }
 
 const ChannelRow: React.FC<ChannelRowProps> = ({
@@ -169,6 +381,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
   const selectedCapabilities = capabilityState?.selected || [];
   const capabilityResults = capabilityState?.results || {};
   const capabilityBusy = capabilityState?.status === 'loading';
+  const channelNameInputId = `llm-channel-${channel.id}-name`;
+  const protocolInputId = `llm-channel-${channel.id}-protocol`;
+  const baseUrlInputId = `llm-channel-${channel.id}-base-url`;
+  const apiKeyInputId = `llm-channel-${channel.id}-api-key`;
+  const modelsInputId = `llm-channel-${channel.id}-models`;
 
   return (
     <div className="mb-2 overflow-hidden rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] shadow-soft-card transition-[background-color,border-color,box-shadow] duration-200 hover:border-[var(--settings-border-strong)] hover:bg-[var(--settings-surface-hover)]">
@@ -259,16 +476,32 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
       {expanded ? (
         <div className="settings-surface-overlay-soft space-y-4 px-4 py-4">
           <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <HelpLabel
+                htmlFor={channelNameInputId}
+                label="渠道名称"
+                fieldKey="LLM_CHANNEL_NAME"
+                helpKey="settings.llm_channel.channel_name"
+                examples={['LLM_CHANNELS=deepseek,aihubmix', 'LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro']}
+              />
             <Input
-              label="渠道名称"
+              id={channelNameInputId}
               value={channel.name}
               disabled={busy}
               onChange={(e) => onUpdate(index, 'name', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
               placeholder="primary"
             />
+            </div>
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-foreground">协议</label>
+              <HelpLabel
+                htmlFor={protocolInputId}
+                label="协议"
+                fieldKey="LLM_CHANNEL_PROTOCOL"
+                helpKey="settings.llm_channel.protocol"
+                examples={['LLM_DEEPSEEK_PROTOCOL=deepseek', 'LLM_OPENROUTER_PROTOCOL=openai']}
+              />
               <Select
+                id={protocolInputId}
                 value={channel.protocol}
                 onChange={(v) => onUpdate(index, 'protocol', normalizeProtocol(v))}
                 options={PROTOCOL_OPTIONS}
@@ -278,8 +511,16 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             </div>
           </div>
 
+          <div>
+            <HelpLabel
+              htmlFor={baseUrlInputId}
+              label="Base URL"
+              fieldKey="LLM_CHANNEL_BASE_URL"
+              helpKey="settings.llm_channel.base_url"
+              examples={['LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com', 'LLM_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1']}
+            />
           <Input
-            label="Base URL"
+            id={baseUrlInputId}
             value={channel.baseUrl}
             disabled={busy}
             onChange={(e) => onUpdate(index, 'baseUrl', e.target.value)}
@@ -289,6 +530,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                 : preset?.baseUrl || 'https://api.example.com/v1'
             }
           />
+          </div>
 
           {showProviderTemplateDetails ? (
             <div className="space-y-2 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
@@ -332,8 +574,16 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             </div>
           ) : null}
 
+          <div>
+            <HelpLabel
+              htmlFor={apiKeyInputId}
+              label="API Key"
+              fieldKey="LLM_CHANNEL_API_KEY"
+              helpKey="settings.llm_channel.api_key"
+              examples={['LLM_DEEPSEEK_API_KEY=sk-xxxx', 'LLM_OPENAI_API_KEYS=sk-key-1,sk-key-2']}
+            />
           <Input
-            label="API Key"
+            id={apiKeyInputId}
             type="password"
             allowTogglePassword
             iconType="key"
@@ -344,6 +594,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
             onChange={(e) => onUpdate(index, 'apiKey', e.target.value)}
             placeholder={channel.protocol === 'ollama' ? '本地 Ollama 可留空' : '支持多个 Key 逗号分隔'}
           />
+          </div>
 
           <div className="space-y-3 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -376,7 +627,12 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
 
             {discoveredModels.length > 0 ? (
               <div>
-                <label className="mb-2 block text-sm font-medium text-foreground">可选模型（可多选）</label>
+                <HelpLabel
+                  label="可选模型（可多选）"
+                  fieldKey="LLM_CHANNEL_DISCOVERED_MODELS"
+                  helpKey="settings.llm_channel.models"
+                  examples={['LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro']}
+                />
                 <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface)] p-3">
                   {discoveredModels.map((model) => (
                     <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
@@ -396,8 +652,16 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
               </div>
             ) : null}
 
+            <div>
+              <HelpLabel
+                htmlFor={modelsInputId}
+                label={discoveredModels.length > 0 ? '手动模型（逗号分隔）' : '模型（逗号分隔）'}
+                fieldKey="LLM_CHANNEL_MODELS"
+                helpKey="settings.llm_channel.models"
+                examples={['LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro', 'LLM_OLLAMA_MODELS=qwen3:8b,llama3.1:8b']}
+              />
             <Input
-              label={discoveredModels.length > 0 ? '手动模型（逗号分隔）' : '模型（逗号分隔）'}
+              id={modelsInputId}
               value={channel.models}
               disabled={busy}
               onChange={(e) => onUpdate(index, 'models', e.target.value)}
@@ -408,6 +672,7 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                   : '若渠道不支持自动发现或请求失败，可直接手动填写模型列表。'
               }
             />
+            </div>
 
             {manualOnlyModels.length > 0 ? (
               <p className="text-[11px] text-secondary-text">
@@ -439,6 +704,11 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
                 >
                   {testState.text}
                 </span>
+                {selectedModels[0] ? (
+                  <p className="text-[11px] text-secondary-text">
+                    基础连接测试默认使用模型列表首项：{selectedModels[0]}
+                  </p>
+                ) : null}
                 {testState.hint ? (
                   <p className="text-[11px] text-secondary-text">
                     {testState.hint}
@@ -451,7 +721,16 @@ const ChannelRow: React.FC<ChannelRowProps> = ({
           <div className="space-y-3 rounded-xl border border-[var(--settings-border)] bg-[var(--settings-surface-hover)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-[11px] font-medium text-muted-text">运行时能力检测（可选）</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[11px] font-medium text-muted-text">运行时能力检测（可选）</p>
+                  <SettingsHelpButton
+                    fieldKey="LLM_CHANNEL_CAPABILITY_CHECKS"
+                    title="运行时能力检测"
+                    helpKey="settings.llm_channel.capability_checks"
+                    examples={['JSON / Tools / Stream / Vision']}
+                    docs={LLM_CHANNEL_HELP_DOCS}
+                  />
+                </div>
                 <p className="mt-0.5 text-[11px] text-secondary-text">
                   仅在手动触发时发起真实 LLM 请求；多选可能需要 20-40 秒。
                 </p>
@@ -703,7 +982,8 @@ const LLM_ERROR_LABELS: Record<string, string> = {
   auth: '鉴权失败',
   timeout: '请求超时',
   quota: '额度或限流',
-  model_not_found: '模型不存在',
+  model_not_found: '模型不可用',
+  request_blocked: '请求被拦截',
   empty_response: '空响应',
   format_error: '格式异常',
   network_error: '网络异常',
@@ -730,10 +1010,11 @@ const LLM_REASON_HINTS: Record<string, string> = {
   rate_limit: '服务商触发 RPM/TPM 或并发限流；请降低请求频率或稍后重试。',
   insufficient_balance: '服务商返回余额、账单或额度不足；请检查账户余额和套餐状态。',
   quota_exceeded: '服务商返回配额已耗尽；请确认账号套餐、余量和项目额度。',
+  provider_blocked: '请求被服务商或中转网关拦截；请检查账号风控、地域限制、模型权限、代理商网关策略、内容安全策略或请求来源限制。',
   dns_error: '域名解析失败；请检查 Base URL 域名、网络代理和 DNS 配置。',
   tls_error: 'TLS/证书握手失败；请检查 HTTPS 证书、中转网关或公司代理策略。',
   connection_refused: '目标服务拒绝连接；请确认 Base URL 端口、服务进程和防火墙配置。',
-  model_access_denied: '当前账号没有访问该模型的权限；请在服务商控制台确认模型开通状态。',
+  model_access_denied: '当前账号无法使用该模型；请确认模型是否已开通、账号是否可见，或模型是否已被禁用。',
   provider_prefix_mismatch: '模型 provider 前缀与当前渠道不匹配；请确认模型名是否应使用该渠道的 OpenAI-compatible 路由。',
   capability_unsupported: '当前模型或兼容层不支持该能力；这不影响基础文本连接，可换模型或关闭该能力依赖。',
 };
@@ -765,6 +1046,27 @@ function getLlmTroubleshootingHint(
     return '该渠道的 /models 接口未返回可用模型 ID；请检查 Base URL 是否指向兼容的模型列表接口，或改为手动填写模型列表。';
   }
   return LLM_TROUBLESHOOTING_HINTS[code || ''];
+}
+
+function buildLlmTestHint(result: {
+  errorCode?: string | null;
+  stage?: string | null;
+  details?: Record<string, unknown>;
+  resolvedModel?: string | null;
+}): string | undefined {
+  const reason = typeof result.details?.reason === 'string' ? result.details.reason : '';
+  const detailsModel = typeof result.details?.model === 'string' ? result.details.model : '';
+  const testedModel = result.resolvedModel || detailsModel;
+  const modelHint = testedModel ? `本次测试模型：${testedModel}。` : '';
+  const scopeInfo = '基础连接测试默认只测试模型列表中的第一个模型。';
+  const shouldSuggestModelListChange = reason === 'model_access_denied'
+    || reason === 'model_not_found'
+    || (result.errorCode === 'model_not_found' && !reason);
+  const modelActionHint = shouldSuggestModelListChange
+    ? '若该模型不可用，请调整模型顺序或移除不可用模型后重试。'
+    : '';
+  const troubleshootingHint = getLlmTroubleshootingHint(result.errorCode, result.stage, 'test', result.details);
+  return [modelHint, scopeInfo, modelActionHint, troubleshootingHint].filter(Boolean).join(' ') || undefined;
 }
 
 function buildLlmFailureText(result: {
@@ -873,6 +1175,26 @@ function runtimeConfigsAreEqual(left: RuntimeConfig, right: RuntimeConfig): bool
     && left.fallbackModels.join(',') === right.fallbackModels.join(',');
 }
 
+function runtimeConfigChangedKeys(left: RuntimeConfig, right: RuntimeConfig): Set<string> {
+  const changed = new Set<string>();
+  if (left.primaryModel !== right.primaryModel) {
+    changed.add('LITELLM_MODEL');
+  }
+  if (left.agentPrimaryModel !== right.agentPrimaryModel) {
+    changed.add('AGENT_LITELLM_MODEL');
+  }
+  if (left.fallbackModels.join(',') !== right.fallbackModels.join(',')) {
+    changed.add('LITELLM_FALLBACK_MODELS');
+  }
+  if (left.temperature !== right.temperature) {
+    changed.add('LLM_TEMPERATURE');
+  }
+  if (left.visionModel !== right.visionModel) {
+    changed.add('VISION_MODEL');
+  }
+  return changed;
+}
+
 function resolveTemperatureFromItems(itemMap: Map<string, string>): string {
   const unified = itemMap.get('LLM_TEMPERATURE');
   if (unified) return unified;
@@ -922,8 +1244,11 @@ function parseRuntimeConfigFromItems(items: Array<{ key: string; value: string }
   };
 }
 
-function parseChannelsFromItems(items: Array<{ key: string; value: string }>): ChannelConfig[] {
-  const itemMap = new Map(items.map((item) => [item.key, item.value]));
+function parseChannelsFromItems(
+  items: Array<{ key: string; value: string }>,
+  itemSourceByKey: Map<string, boolean> = new Map(),
+): ChannelConfig[] {
+  const itemMap = new Map(items.map((item) => [item.key.toUpperCase(), item.value]));
   const channelNames = (itemMap.get('LLM_CHANNELS') || '')
     .split(',')
     .map((segment) => segment.trim())
@@ -940,7 +1265,7 @@ function parseChannelsFromItems(items: Array<{ key: string; value: string }>): C
       name: name.toLowerCase(),
       protocol: inferProtocol(itemMap.get(`LLM_${upperName}_PROTOCOL`) || '', baseUrl, models),
       baseUrl,
-      apiKey: itemMap.get(`LLM_${upperName}_API_KEYS`) || itemMap.get(`LLM_${upperName}_API_KEY`) || '',
+      apiKey: resolveInitialChannelApiKeyValue(name, itemMap, itemSourceByKey),
       models: rawModels,
       enabled: parseEnabled(itemMap.get(`LLM_${upperName}_ENABLED`)),
     };
@@ -1013,7 +1338,32 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
   onSaved,
   disabled = false,
 }) => {
-  const initialChannels = useMemo(() => parseChannelsFromItems(items), [items]);
+  const initialItemSourceByKey = useMemo(() => {
+    const sourceByKey = new Map<string, boolean>();
+    for (const item of items) {
+      sourceByKey.set(item.key.toUpperCase(), item.rawValueExists !== false);
+    }
+    for (const [key, hasSource] of sourceByKey) {
+      if (hasSource) {
+        continue;
+      }
+      const match = CHANNEL_FIELD_KEY_PATTERN.exec(key);
+      if (!match) {
+        continue;
+      }
+      const channelName = match[1];
+      for (const channelKey of parseChannelFieldKeysFromName(channelName)) {
+        if (!sourceByKey.has(channelKey)) {
+          sourceByKey.set(channelKey, false);
+        }
+      }
+    }
+    return sourceByKey;
+  }, [items]);
+  const initialChannels = useMemo(
+    () => parseChannelsFromItems(items, initialItemSourceByKey),
+    [items, initialItemSourceByKey],
+  );
   const initialNames = useMemo(() => initialChannels.map((channel) => channel.name), [initialChannels]);
   const initialRuntimeConfig = useMemo(() => parseRuntimeConfigFromItems(items), [items]);
   const savedItemMap = useMemo(() => new Map(items.map((item) => [item.key.toUpperCase(), item.value])), [items]);
@@ -1297,7 +1647,23 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     setSaveWarnings([]);
 
     try {
-      const updateItems = channelsToUpdateItems(channels, initialNames, runtimeConfigForSave, managesRuntimeConfig);
+      const changedKeys = new Set<string>([
+        ...buildChangedItemKeys(channels, initialChannels, initialItemSourceByKey, savedItemMap),
+        ...runtimeConfigChangedKeys(runtimeConfigForSave, initialRuntimeConfig),
+      ]);
+      const updateItems = channelsToUpdateItems(channels, initialNames, runtimeConfigForSave, managesRuntimeConfig).filter(
+        (item) => {
+          const itemKey = item.key.toUpperCase();
+          const initialItemSource = initialItemSourceByKey.get(itemKey);
+          if (initialItemSource === false) {
+            return changedKeys.has(itemKey);
+          }
+          if (isChannelSecretFieldKey(itemKey) && initialItemSource === undefined) {
+            return changedKeys.has(itemKey);
+          }
+          return true;
+        },
+      );
       const response = await systemConfigApi.update({
         configVersion,
         maskToken,
@@ -1339,7 +1705,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       const text = result.success
         ? `连接成功${result.resolvedModel ? ` · ${result.resolvedModel}` : ''}${result.latencyMs ? ` · ${result.latencyMs} ms` : ''}`
         : buildLlmFailureText(result);
-      const hint = result.success ? undefined : getLlmTroubleshootingHint(result.errorCode, result.stage, 'test', result.details);
+      const hint = result.success ? undefined : buildLlmTestHint(result);
 
       setTestStates((previous) => ({
         ...previous,
@@ -1479,7 +1845,7 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
               ? '未返回能力检测结果'
               : buildLlmFailureText(result),
           hint: getFirstCapabilityHint(capabilityResults)
-            || (!result.success ? getLlmTroubleshootingHint(result.errorCode, result.stage, 'test', result.details) : undefined),
+            || (!result.success ? buildLlmTestHint(result) : undefined),
           results: capabilityResults,
         },
       }));
@@ -1621,7 +1987,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                 <Badge variant="default" className="border-[var(--settings-border)] bg-[var(--settings-surface-hover)] text-muted-text">Runtime</Badge>
               </div>
               <div className="mb-4">
-                <label className="mb-1 block text-xs text-muted-text">Temperature</label>
+                <HelpLabel
+                  label="Temperature"
+                  fieldKey="LLM_TEMPERATURE"
+                  helpKey="settings.llm_channel.temperature"
+                  examples={['LLM_TEMPERATURE=0.2', 'LLM_TEMPERATURE=0.7']}
+                  compact
+                />
                 <div className="flex items-center gap-3">
                   <input
                     type="range"
@@ -1647,7 +2019,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <label htmlFor="runtime-primary-model" className="mb-1 block text-xs text-muted-text">主模型</label>
+                    <HelpLabel
+                      htmlFor="runtime-primary-model"
+                      label="主模型"
+                      fieldKey="LITELLM_MODEL"
+                      helpKey="settings.llm_channel.primary_model"
+                      examples={['LITELLM_MODEL=deepseek/deepseek-v4-flash']}
+                      compact
+                    />
                     <Select
                       id="runtime-primary-model"
                       value={runtimeConfig.primaryModel}
@@ -1659,7 +2038,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
 
                   <div>
-                    <label htmlFor="runtime-agent-primary-model" className="mb-1 block text-xs text-muted-text">Agent 主模型</label>
+                    <HelpLabel
+                      htmlFor="runtime-agent-primary-model"
+                      label="Agent 主模型"
+                      fieldKey="AGENT_LITELLM_MODEL"
+                      helpKey="settings.llm_channel.agent_primary_model"
+                      examples={['AGENT_LITELLM_MODEL=deepseek/deepseek-v4-pro']}
+                      compact
+                    />
                     <Select
                       id="runtime-agent-primary-model"
                       value={runtimeConfig.agentPrimaryModel}
@@ -1674,7 +2060,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
 
                   <div>
-                    <label className="mb-2 block text-xs text-muted-text">备选模型</label>
+                    <HelpLabel
+                      label="备选模型"
+                      fieldKey="LITELLM_FALLBACK_MODELS"
+                      helpKey="settings.llm_channel.fallback_models"
+                      examples={['LITELLM_FALLBACK_MODELS=deepseek/deepseek-v4-pro,gemini/gemini-3-flash-preview']}
+                      compact
+                    />
                     <div className="space-y-2 rounded-xl border settings-border-strong settings-surface-overlay-soft p-3">
                       {availableModels.map((model) => (
                         <label key={model} className="flex items-center gap-2 text-sm text-secondary-text">
@@ -1695,7 +2087,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
                   </div>
 
                   <div>
-                    <label htmlFor="runtime-vision-model" className="mb-1 block text-xs text-muted-text">Vision 模型</label>
+                    <HelpLabel
+                      htmlFor="runtime-vision-model"
+                      label="Vision 模型"
+                      fieldKey="VISION_MODEL"
+                      helpKey="settings.llm_channel.vision_model"
+                      examples={['VISION_MODEL=gemini/gemini-3.1-pro-preview']}
+                      compact
+                    />
                     <Select
                       id="runtime-vision-model"
                       value={runtimeConfig.visionModel}

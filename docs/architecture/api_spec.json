@@ -229,13 +229,21 @@
           "History"
         ],
         "summary": "获取历史分析列表",
-        "description": "分页获取历史分析记录摘要，支持按股票代码和日期范围筛选",
+        "description": "分页获取历史分析记录摘要，支持按股票代码、报告类型和日期范围筛选",
         "operationId": "getHistoryList",
         "parameters": [
           {
             "name": "stock_code",
             "in": "query",
             "description": "股票代码筛选",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "report_type",
+            "in": "query",
+            "description": "报告类型筛选（如 market_review）；不传则返回所有类型历史。",
             "schema": {
               "type": "string"
             }
@@ -509,9 +517,9 @@
         "tags": [
           "SystemConfig"
         ],
-        "summary": "导出桌面端 `.env` 备份",
-        "description": "仅桌面模式可用。返回当前已保存 `.env` 的原始文本内容，用于桌面端备份。",
-        "operationId": "exportDesktopSystemConfig",
+        "summary": "导出 `.env` 备份",
+        "description": "返回当前已保存 `.env` 的原始文本内容，用于配置备份。",
+        "operationId": "exportSystemConfig",
         "responses": {
           "200": {
             "description": "导出成功",
@@ -524,7 +532,7 @@
             }
           },
           "401": {
-            "description": "未认证",
+            "description": "未登录",
             "content": {
               "application/json": {
                 "schema": {
@@ -534,7 +542,7 @@
             }
           },
           "403": {
-            "description": "仅桌面模式可用",
+            "description": "未开启管理员鉴权（`ADMIN_AUTH_ENABLED=false`）",
             "content": {
               "application/json": {
                 "schema": {
@@ -561,9 +569,9 @@
         "tags": [
           "SystemConfig"
         ],
-        "summary": "导入桌面端 `.env` 备份",
-        "description": "仅桌面模式可用。按键级覆盖方式把备份文本合并到当前 `.env`，并沿用现有配置版本冲突保护。",
-        "operationId": "importDesktopSystemConfig",
+        "summary": "导入 `.env` 备份",
+        "description": "按键级覆盖方式把备份文本合并到当前 `.env`，并沿用现有配置版本冲突保护。",
+        "operationId": "importSystemConfig",
         "requestBody": {
           "required": true,
           "content": {
@@ -613,7 +621,7 @@
             }
           },
           "403": {
-            "description": "仅桌面模式可用",
+            "description": "未开启管理员鉴权（`ADMIN_AUTH_ENABLED=false`）",
             "content": {
               "application/json": {
                 "schema": {
@@ -793,6 +801,17 @@
             "type": "boolean",
             "default": false,
             "description": "是否使用异步模式"
+          },
+          "analysis_phase": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "premarket",
+              "intraday",
+              "postmarket"
+            ],
+            "default": "auto",
+            "description": "分析阶段覆盖：auto(自动推断) / premarket(盘前) / intraday(盘中) / postmarket(盘后)"
           }
         }
       },
@@ -842,6 +861,17 @@
           "message": {
             "type": "string",
             "example": "Analysis task accepted"
+          },
+          "analysis_phase": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "premarket",
+              "intraday",
+              "postmarket"
+            ],
+            "default": "auto",
+            "description": "请求的分析阶段"
           }
         },
         "required": [
@@ -869,6 +899,17 @@
           },
           "message": {
             "type": "string"
+          },
+          "analysis_phase": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "premarket",
+              "intraday",
+              "postmarket"
+            ],
+            "default": "auto",
+            "description": "请求的分析阶段"
           }
         },
         "required": [
@@ -950,6 +991,17 @@
           "error": {
             "type": "string",
             "description": "错误信息（仅在 failed 时存在）"
+          },
+          "analysis_phase": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "premarket",
+              "intraday",
+              "postmarket"
+            ],
+            "nullable": true,
+            "description": "请求的分析阶段；无持久化字段的历史 DB fallback 可能为空"
           }
         },
         "required": [
@@ -1019,6 +1071,17 @@
           "error": {
             "type": "string",
             "description": "错误信息"
+          },
+          "analysis_phase": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "premarket",
+              "intraday",
+              "postmarket"
+            ],
+            "default": "auto",
+            "description": "请求的分析阶段"
           }
         },
         "required": [
@@ -1562,7 +1625,7 @@
       },
       "ExportSystemConfigResponse": {
         "type": "object",
-        "description": "桌面端 `.env` 原文导出响应",
+        "description": "`.env` 原文导出响应",
         "properties": {
           "content": {
             "type": "string",
@@ -1630,7 +1693,7 @@
       },
       "ImportSystemConfigRequest": {
         "type": "object",
-        "description": "桌面端 `.env` 导入请求",
+        "description": "`.env` 导入请求",
         "properties": {
           "config_version": {
             "type": "string"

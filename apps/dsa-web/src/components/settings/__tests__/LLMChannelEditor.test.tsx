@@ -54,6 +54,43 @@ describe('LLMChannelEditor', () => {
     expect(input).toHaveAttribute('type', 'text');
   });
 
+  it('shows help dialogs for channel editor fields', async () => {
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'deepseek' },
+          { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
+          { key: 'LLM_DEEPSEEK_BASE_URL', value: 'https://api.deepseek.com' },
+          { key: 'LLM_DEEPSEEK_ENABLED', value: 'true' },
+          { key: 'LLM_DEEPSEEK_API_KEY', value: 'sk-test' },
+          { key: 'LLM_DEEPSEEK_MODELS', value: 'deepseek-v4-flash' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /DeepSeek 官方/i }));
+    fireEvent.click(await screen.findByRole('button', { name: '查看 Base URL 配置说明' }));
+
+    expect(screen.getByRole('dialog', { name: 'Base URL' })).toBeInTheDocument();
+    expect(screen.getByText('该渠道的接口根地址。')).toBeInTheDocument();
+    expect(screen.getByText('LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(await screen.findByRole('button', { name: '查看 Temperature 配置说明' }));
+
+    expect(screen.getByRole('dialog', { name: 'Temperature' })).toBeInTheDocument();
+    expect(screen.getByText('运行时统一采样温度。')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(await screen.findByRole('button', { name: '查看 运行时能力检测 配置说明' }));
+
+    expect(screen.getByRole('dialog', { name: '运行时能力检测' })).toBeInTheDocument();
+    expect(screen.getByText('选择能力后点击检测；检测会发起真实 LLM 请求。')).toBeInTheDocument();
+  });
+
   it('hides LiteLLM wording when advanced YAML routing is enabled', () => {
     render(
       <LLMChannelEditor
@@ -123,7 +160,7 @@ describe('LLMChannelEditor', () => {
   });
 
   it.each([
-    ['minimax', /MiniMax 官方/i, 'https://api.minimax.io/v1', 'MiniMax-M2.7,MiniMax-M2.7-highspeed'],
+    ['minimax', /MiniMax 官方/i, 'https://api.minimax.io/v1', 'MiniMax-M3,MiniMax-M2.7,MiniMax-M2.7-highspeed'],
     ['volcengine', /火山方舟/i, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-1-6-251015,doubao-seed-1-6-thinking-251015'],
   ])('uses %s OpenAI-compatible defaults when adding the official preset', async (preset, buttonName, baseUrl, models) => {
     render(
@@ -278,8 +315,8 @@ describe('LLMChannelEditor', () => {
       'https://api.minimax.io/v1',
     ]);
     expect(screen.getAllByLabelText('模型（逗号分隔）').map((input) => (input as HTMLInputElement).value)).toEqual([
-      'MiniMax-M2.7,MiniMax-M2.7-highspeed',
-      'MiniMax-M2.7,MiniMax-M2.7-highspeed',
+      'MiniMax-M3,MiniMax-M2.7,MiniMax-M2.7-highspeed',
+      'MiniMax-M3,MiniMax-M2.7,MiniMax-M2.7-highspeed',
     ]);
     expect(screen.getAllByRole('link', { name: 'MiniMax OpenAI API' })).toHaveLength(1);
   });
@@ -319,9 +356,221 @@ describe('LLMChannelEditor', () => {
         expect.objectContaining({ key: 'LLM_CHANNELS', value: 'minimax' }),
         expect.objectContaining({ key: 'LLM_MINIMAX_PROTOCOL', value: 'openai' }),
         expect.objectContaining({ key: 'LLM_MINIMAX_BASE_URL', value: 'https://api.minimax.io/v1' }),
-        expect.objectContaining({ key: 'LLM_MINIMAX_MODELS', value: 'MiniMax-M2.7,MiniMax-M2.7-highspeed' }),
+        expect.objectContaining({ key: 'LLM_MINIMAX_MODELS', value: 'MiniMax-M3,MiniMax-M2.7,MiniMax-M2.7-highspeed' }),
       ]),
     );
+  });
+
+  it('only persists edited values for runtime-only channel keys', async () => {
+    update.mockResolvedValue({
+      success: true,
+      configVersion: 'v2',
+      appliedCount: 1,
+      skippedMaskedCount: 0,
+      reloadTriggered: true,
+      updatedKeys: ['LLM_CHANNELS', 'LLM_MY_PROXY_MODELS'],
+      warnings: [],
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
+          { key: 'LITELLM_MODEL', value: 'openai/gpt-4o', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_BASE_URL', value: 'https://proxy.example.com/v1', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_ENABLED', value: 'true', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_API_KEYS', value: 'sk-runtime-only', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_MODELS', value: 'gpt-4o-mini', rawValueExists: false },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /my_proxy/i }));
+    fireEvent.change(screen.getByLabelText('模型（逗号分隔）'), { target: { value: 'gpt-4o-mini,gpt-4o' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalled();
+    });
+
+    const updatePayload = update.mock.calls[0][0];
+    const updateItemMap = new Map(updatePayload.items.map((item: { key: string; value: string }) => [item.key, item.value]));
+
+    expect(updateItemMap.get('LLM_MY_PROXY_MODELS')).toBe('gpt-4o-mini,gpt-4o');
+    expect(updateItemMap.has('LITELLM_MODEL')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_PROTOCOL')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_BASE_URL')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_API_KEY')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_API_KEYS')).toBe(false);
+  });
+
+  it('renames a mixed raw/runtime channel and clears persisted API key field', async () => {
+    update.mockResolvedValue({
+      success: true,
+      configVersion: 'v2',
+      appliedCount: 1,
+      skippedMaskedCount: 0,
+      reloadTriggered: true,
+      updatedKeys: ['LLM_MY_PROXY_API_KEY', 'LLM_MY_PROXY2_API_KEY', 'LLM_MY_PROXY2_BASE_URL', 'LLM_MY_PROXY2_MODELS'],
+      warnings: [],
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'my_proxy' },
+          { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_BASE_URL', value: 'https://proxy.example.com/v1', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_ENABLED', value: 'true', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_API_KEY', value: 'sk-saved' },
+          { key: 'LLM_MY_PROXY_MODELS', value: 'gpt-4o-mini', rawValueExists: false },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /my_proxy/i }));
+    fireEvent.change(screen.getByLabelText('渠道名称'), { target: { value: 'my_proxy2' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalled();
+    });
+
+    const updatePayload = update.mock.calls[0][0];
+    const updateItemMap = new Map(updatePayload.items.map((item: { key: string; value: string }) => [item.key, item.value]));
+
+    expect(updateItemMap.get('LLM_MY_PROXY_API_KEY')).toBe('');
+    expect(updateItemMap.has('LLM_MY_PROXY_API_KEYS')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_PROTOCOL')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_BASE_URL')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_MODELS')).toBe(false);
+    expect(updateItemMap.get('LLM_MY_PROXY2_API_KEY')).toBe('sk-saved');
+    expect(updateItemMap.get('LLM_MY_PROXY2_BASE_URL')).toBe('https://proxy.example.com/v1');
+    expect(updateItemMap.get('LLM_MY_PROXY2_MODELS')).toBe('gpt-4o-mini');
+  });
+
+  it('uses runtime API_KEYS when both API_KEY and API_KEYS coexist', async () => {
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_BASE_URL', value: 'https://proxy.example.com/v1', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_ENABLED', value: 'true', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_API_KEY', value: 'sk-saved' },
+          { key: 'LLM_MY_PROXY_API_KEYS', value: 'sk-runtime-only', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_MODELS', value: 'gpt-4o-mini', rawValueExists: false },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /my_proxy/i }));
+    expect(screen.getByLabelText('API Key')).toHaveValue('sk-runtime-only');
+  });
+
+  it('does not migrate conflicted API key data as API_KEY when renaming a channel', async () => {
+    update.mockResolvedValue({
+      success: true,
+      configVersion: 'v2',
+      appliedCount: 1,
+      skippedMaskedCount: 0,
+      reloadTriggered: true,
+      updatedKeys: ['LLM_CHANNELS', 'LLM_MY_PROXY_API_KEY', 'LLM_MY_PROXY2_PROTOCOL', 'LLM_MY_PROXY2_BASE_URL', 'LLM_MY_PROXY2_MODELS'],
+      warnings: [],
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_BASE_URL', value: 'https://proxy.example.com/v1', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_ENABLED', value: 'true', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_API_KEY', value: 'sk-saved' },
+          { key: 'LLM_MY_PROXY_API_KEYS', value: 'sk-runtime-only', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_MODELS', value: 'gpt-4o-mini', rawValueExists: false },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /my_proxy/i }));
+    fireEvent.change(screen.getByLabelText('渠道名称'), { target: { value: 'my_proxy2' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalled();
+    });
+
+    const updatePayload = update.mock.calls[0][0];
+    const updateItemMap = new Map(updatePayload.items.map((item: { key: string; value: string }) => [item.key, item.value]));
+
+    expect(updateItemMap.get('LLM_CHANNELS')).toBe('my_proxy2');
+    expect(updateItemMap.has('LLM_MY_PROXY2_API_KEY')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY2_API_KEYS')).toBe(false);
+    expect([...updateItemMap.values()]).not.toContain('sk-runtime-only');
+    expect([...updateItemMap.values()]).not.toContain('sk-saved');
+    expect(updateItemMap.get('LLM_MY_PROXY_API_KEY')).toBe('');
+    expect(updateItemMap.get('LLM_MY_PROXY2_BASE_URL')).toBe('https://proxy.example.com/v1');
+    expect(updateItemMap.get('LLM_MY_PROXY2_MODELS')).toBe('gpt-4o-mini');
+  });
+
+  it('does not migrate runtime-only API keys when renaming a startup-env channel', async () => {
+    update.mockResolvedValue({
+      success: true,
+      configVersion: 'v2',
+      appliedCount: 1,
+      skippedMaskedCount: 0,
+      reloadTriggered: true,
+      updatedKeys: ['LLM_CHANNELS', 'LLM_MY_PROXY2_BASE_URL', 'LLM_MY_PROXY2_MODELS'],
+      warnings: [],
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_BASE_URL', value: 'https://proxy.example.com/v1', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_ENABLED', value: 'true', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_API_KEYS', value: 'sk-runtime-only', rawValueExists: false },
+          { key: 'LLM_MY_PROXY_MODELS', value: 'gpt-4o-mini', rawValueExists: false },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /my_proxy/i }));
+    fireEvent.change(screen.getByLabelText('渠道名称'), { target: { value: 'my_proxy2' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }));
+
+    await waitFor(() => {
+      expect(update).toHaveBeenCalled();
+    });
+
+    const updatePayload = update.mock.calls[0][0];
+    const updateItemMap = new Map(updatePayload.items.map((item: { key: string; value: string }) => [item.key, item.value]));
+
+    expect(updateItemMap.get('LLM_CHANNELS')).toBe('my_proxy2');
+    expect(updateItemMap.has('LLM_MY_PROXY_API_KEY')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY_API_KEYS')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY2_API_KEY')).toBe(false);
+    expect(updateItemMap.has('LLM_MY_PROXY2_API_KEYS')).toBe(false);
+    expect([...updateItemMap.values()]).not.toContain('sk-runtime-only');
   });
 
   it('sanitizes stale runtime models before saving DeepSeek V4 channel changes', async () => {
@@ -940,6 +1189,92 @@ describe('LLMChannelEditor', () => {
 
     expect(await screen.findByText(/聊天调用 · 鉴权失败：LLM authentication failed/i)).toBeInTheDocument();
     expect(screen.getByText(/请检查 API Key 是否正确/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
+  });
+
+  it('shows tested model and model-availability hints when a model is disabled', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM channel test failed',
+      error: 'litellm.APIError: APIError: OpenAIException - Model disabled.',
+      errorCode: 'model_not_found',
+      stage: 'chat_completion',
+      retryable: false,
+      details: { reason: 'model_access_denied', model: 'openai/deepseek-ai/DeepSeek-V3' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/deepseek-ai/DeepSeek-V3',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'siliconflow' },
+          { key: 'LLM_SILICONFLOW_PROTOCOL', value: 'openai' },
+          { key: 'LLM_SILICONFLOW_BASE_URL', value: 'https://api.siliconflow.cn/v1' },
+          { key: 'LLM_SILICONFLOW_ENABLED', value: 'true' },
+          { key: 'LLM_SILICONFLOW_API_KEY', value: 'secret-key' },
+          { key: 'LLM_SILICONFLOW_MODELS', value: 'deepseek-ai/DeepSeek-V3,Qwen/Qwen3-Coder' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /SiliconFlow/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/聊天调用 · 模型不可用：LLM channel test failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/本次测试模型：openai\/deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
+    expect(screen.getByText(/基础连接测试默认使用模型列表首项：deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
+    expect(screen.getByText(/基础连接测试默认只测试模型列表中的第一个模型/i)).toBeInTheDocument();
+    expect(screen.getByText(/调整模型顺序或移除不可用模型/i)).toBeInTheDocument();
+    expect(screen.getByText(/模型是否已开通、账号是否可见/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
+    expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({
+      models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen3-Coder'],
+    }));
+  });
+
+  it('shows provider blocked troubleshooting without network or model-list hints', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM request was blocked by provider or gateway policy',
+      error: 'litellm.APIError: APIError: OpenAIException - Your request was blocked.',
+      errorCode: 'request_blocked',
+      stage: 'chat_completion',
+      retryable: false,
+      details: { reason: 'provider_blocked', model: 'openai/gpt-5.5' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-5.5',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'proxy' },
+          { key: 'LLM_PROXY_PROTOCOL', value: 'openai' },
+          { key: 'LLM_PROXY_BASE_URL', value: 'https://gateway.example.com/v1' },
+          { key: 'LLM_PROXY_ENABLED', value: 'true' },
+          { key: 'LLM_PROXY_API_KEY', value: 'secret-key' },
+          { key: 'LLM_PROXY_MODELS', value: 'gpt-5.5,gpt-4o-mini' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /proxy/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/聊天调用 · 请求被拦截/i)).toBeInTheDocument();
+    expect(screen.getByText(/本次测试模型：openai\/gpt-5\.5/i)).toBeInTheDocument();
+    expect(screen.getByText(/账号风控、地域限制、模型权限/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
   });
 
   it('shows focused quota exceeded troubleshooting hints', async () => {
@@ -969,6 +1304,37 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
     expect(await screen.findByText(/服务商返回配额已耗尽/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show model-list action hints for network failures', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM request failed before a valid response was returned',
+      error: 'DNS lookup failed',
+      errorCode: 'network_error',
+      stage: 'chat_completion',
+      retryable: true,
+      details: { reason: 'dns_error' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/域名解析失败/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
   });
 
   it('does not request runtime capabilities during the basic connection test', async () => {
